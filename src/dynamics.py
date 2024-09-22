@@ -34,7 +34,7 @@ def RPR_robot_kinematics() -> rtb.ETS:
 
 
 # ---------- Question 4.2 ---------- #
-def simulateDynamics(q_start: np.ndarray, q_end: np.ndarray, n:int, t_total:float) -> np.ndarray:
+def simulateDynamics(q_start: np.ndarray, q_end: np.ndarray, n: int, t_total: float) -> np.ndarray:
     """
     This function simulates the dynamics of the RPR robot.
     Refer to the dynamics.pdf for the robot description.
@@ -44,7 +44,7 @@ def simulateDynamics(q_start: np.ndarray, q_end: np.ndarray, n:int, t_total:floa
     q_start
         the initial joint angles [in radians/metres] given as an array of shape (3,)
     q_end
-        the final joint angles [in radians/metres] given as an array of shape (3,) 
+        the final joint angles [in radians/metres] given as an array of shape (3,)
     n
         the number of time steps for the simulation
     t_total
@@ -55,37 +55,58 @@ def simulateDynamics(q_start: np.ndarray, q_end: np.ndarray, n:int, t_total:floa
     Q
         The joint torques at each time step as an array of shape (3,n)
     """
-    
-    # your code here
-    robot = RPR_robot_kinematics()
-    robot = rtb.Robot(robot)
 
-    # Time array
-    t = np.linspace(0, t_total, n)
+    # Initialize the robot kinematics model
+    robot_kin = RPR_robot_kinematics()  # Generate the ETS description of the robot
+    robot = rtb.ERobot(robot_kin)  # Convert to an ERobot model to simulate dynamics
 
-    # Quintic trajectory generation for each joint
-    traj_q1 = rtb.tools.trajectory.jtraj(q_start[0], q_end[0], t)
-    traj_q2 = rtb.tools.trajectory.jtraj(q_start[1], q_end[1], t)
-    traj_q3 = rtb.tools.trajectory.jtraj(q_start[2], q_end[2], t)
+    # Time steps array
+    time_steps = np.linspace(0, t_total, n)
 
-    # Initialize arrays for torques at each time step
-    Q = np.zeros((3, n))
+    # Generate quintic trajectory for each joint
+    traj_q1 = rtb.jtraj(q_start[0], q_end[0], time_steps)  # Trajectory for joint 1 (Revolute about y-axis)
+    traj_q2 = rtb.jtraj(q_start[1], q_end[1], time_steps)  # Trajectory for joint 2 (Prismatic along x-axis)
+    traj_q3 = rtb.jtraj(q_start[2], q_end[2], time_steps)  # Trajectory for joint 3 (Revolute about x-axis)
+
+    # Initialize an array to store joint torques for each time step
+    Q = np.zeros((3, n))  # Shape (3, n) for the 3 joints over n time steps
+
+    # Define robot's physical properties
+    L1 = 0.4  # Length of link 1 (meters)
+    L3 = 0.1  # Length of link 3 (meters)
+    mass = 1.0  # Mass of each link (kg)
+
+    # Define the centers of mass for each link
+    com = np.array([
+        [L1 / 2, 0, 0],  # Center of mass for link 1 (midway along x-axis)
+        [0, 0, 0],       # Center of mass for prismatic link 2 (at joint)
+        [L3 / 2, 0, 0]   # Center of mass for link 3 (midway along x-axis)
+    ])
+
+    # Inertia tensor for each cylindrical link
+    I_cylinder = np.array([0.5 * mass * (0.1 ** 2), 0.5 * mass * (0.1 ** 2), 0.5 * mass * (0.1 ** 2)])
 
     # Set dynamic properties for each link
-    robot.links[0].m = 1  # mass of the link
-    robot.links[1].m = 1
-    robot.links[2].m = 1
+    for i in range(3):
+        robot.links[i].m = mass  # Set mass for each link
+        robot.links[i].r = com[i]  # Set the center of mass directly
+        robot.links[i].I = I_cylinder  # Set the inertia tensor directly
 
+    # Set gravity vector (acting in the negative z direction)
+    robot.gravity = np.array([0, 0, -9.81])
+
+    # Loop through each time step to calculate the joint torques
     for i in range(n):
-        # Joint positions, velocities, and accelerations at time step i
-        q = np.array([traj_q1.q[i], traj_q2.q[i], traj_q3.q[i]]).reshape((1,-1))
-        qd = np.array([traj_q1.qd[i], traj_q2.qd[i], traj_q3.qd[i]]).reshape((1,-1))
-        qdd = np.array([traj_q1.qdd[i], traj_q2.qdd[i], traj_q3.qdd[i]]).reshape((1,-1))
-        
-        # Compute the torques using RNE
+        # Get the joint positions, velocities, and accelerations at the current time step
+        q = np.array([traj_q1.q[i][0], traj_q2.q[i][0], traj_q3.q[i][0]])  # Extract values as scalars
+        qd = np.array([traj_q1.qd[i][0], traj_q2.qd[i][0], traj_q3.qd[i][0]])  # Extract values as scalars
+        qdd = np.array([traj_q1.qdd[i][0], traj_q2.qdd[i][0], traj_q3.qdd[i][0]])  # Extract values as scalars
 
-        Q[:, i] = robot.rne(q, qd, qdd)
+        # Calculate joint torques using recursive Newton-Euler algorithm with gravity
+        tau = robot.rne(q, qd, qdd)  # Compute torques
+        Q[:, i] = tau  # Store the torques in the matrix
 
+    # Return the joint torques matrix
     return Q
     
 
